@@ -134,8 +134,10 @@ async function renderPageHtml(page: SeoPage) {
   const description = page.description.slice(0, 320);
   const canonical = canonicalFor(page.path);
   const image = absoluteMediaUrl(page.image);
+  const ampHref = page.path === "/" ? "https://cesmevip1.shop/" : null;
   const metadata = [
     canonical ? `<link rel="canonical" href="${escapeHtml(canonical)}" />` : "",
+    ampHref ? `<link rel="amphtml" href="${escapeHtml(ampHref)}" />` : "",
     `<meta property="og:site_name" content="${escapeHtml(page.siteName || "VIP İlan")}" />`,
     `<meta property="og:type" content="${page.type ?? "website"}" />`,
     `<meta property="og:title" content="${escapeHtml(title)}" />`,
