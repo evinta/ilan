@@ -4,19 +4,23 @@ import { ArrowLeft, ArrowRight, BadgeCheck, Check, ChevronLeft, ChevronRight, Cl
 import ProfileCard from "@/components/site/ProfileCard";
 import { SiteFooter, SiteHeader } from "@/components/site/SiteShell";
 import { trpc } from "@/lib/trpc";
+import { usePageMeta } from "@/hooks/usePageMeta";
 
 export default function ProfilePage() {
   const [, params] = useRoute("/profil/:slug");
   const slug = params?.slug ?? "";
   const profileQuery = trpc.listings.publicDetail.useQuery({ slug }, { enabled: Boolean(slug) });
   const similarQuery = trpc.listings.publicList.useQuery();
+  const layoutQuery = trpc.site.publicLayout.useQuery();
   const revealContact = trpc.listings.publicContact.useMutation();
   const profile = profileQuery.data;
+  const siteName = layoutQuery.data?.settings.siteName ?? "VIP İlan";
   const [activePhoto, setActivePhoto] = useState(0);
   const [contact, setContact] = useState<string | null>(null);
   const [contactOpen, setContactOpen] = useState(false);
   const [saved, setSaved] = useState(false);
   const [copied, setCopied] = useState(false);
+  usePageMeta({ title: profile?.seoTitle || (profile ? `${profile.name}, ${profile.age} | ${profile.district} | ${siteName}` : `Profil | ${siteName}`), description: profile?.seoDescription || profile?.summary || layoutQuery.data?.settings.defaultSeoDescription || "Yayındaki profilleri keşfedin.", path: `/profil/${slug}`, siteName, image: profile?.images[0], noIndex: !profile?.allowIndexing, type: "article" });
   const photos = profile?.images.length ? profile.images : profile?.image ? [profile.image] : [];
   const similar = (similarQuery.data ?? []).filter((item) => item.slug !== slug).slice(0, 3);
   const move = (direction: number) => setActivePhoto((index) => (index + direction + photos.length) % photos.length);
@@ -45,7 +49,7 @@ export default function ProfilePage() {
         <div className="profile-badges">{profile.verified && <span className="verified-badge"><BadgeCheck size={16} fill="currentColor" /> Onaylı profil</span>}{profile.premium && <span className="premium-badge"><Sparkles size={14} /> Öne çıkan</span>}</div><p className="profile-summary-text">{profile.summary}</p>
         <div className="profile-stats-row"><div><span>YAŞ</span><strong>{profile.age}</strong></div><div><span>BOY</span><strong>{profile.height}</strong></div><div><span>BEĞENİ</span><strong><Heart size={14} /> {profile.likes}</strong></div></div>
         <div className="profile-contact-actions"><button className="button button-primary contact-button" onClick={() => void openContact()} disabled={!profile.contactVisible}><MessageCircle size={18} /> {profile.contactVisible ? "İletişim bilgilerini gör" : "İletişim bilgisi yok"}</button><span className="contact-subline"><ShieldCheck size={14} /> İletişim bilgisi ilanın görünürlük ayarına bağlıdır</span></div>{copied && <div className="copy-feedback"><Check size={14} /> Profil bağlantısı kopyalandı</div>}
-        <div className="profile-quick-info"><div className="quick-info-row"><span><Clock3 size={16} /> İlan durumu</span><strong>Yayında</strong></div><div className="quick-info-row"><span><MapPin size={16} /> Bölge</span><strong>{profile.district}, Antalya</strong></div><div className="quick-info-row"><span><Languages size={16} /> Diller</span><strong>{profile.languages.join(" · ") || "Belirtilmedi"}</strong></div></div>
+        <div className="profile-quick-info"><div className="quick-info-row"><span><Clock3 size={16} /> İlan durumu</span><strong>Yayında</strong></div><div className="quick-info-row"><span><MapPin size={16} /> Bölge</span><strong>{profile.district}, {profile.city ?? "Antalya"}</strong></div>{profile.categoryId && profile.categorySlug && <div className="quick-info-row"><span> Kategori</span><strong><Link href={`/kategori/${profile.categorySlug}`}>{profile.categoryName ?? "Kategoriyi görüntüle"}</Link></strong></div>}{profile.citySlug && profile.districtSlug && <div className="quick-info-row"><span>Semt sayfası</span><strong><Link href={`/bolge/${profile.citySlug}/${profile.districtSlug}`}>{profile.district}</Link></strong></div>}<div className="quick-info-row"><span><Languages size={16} /> Diller</span><strong>{profile.languages.join(" · ") || "Belirtilmedi"}</strong></div></div>
       </div></section>
     <section className="profile-content-grid"><div className="profile-about-card"><div className="content-section-heading"><span className="section-kicker">PROFİL TANITIMI</span><h2>Merhaba, ben <em>{profile.name}.</em></h2></div><p>{profile.about}</p><div className="profile-tags-heading">ÖNE ÇIKAN ÖZELLİKLER</div><div className="profile-feature-tags">{profile.tags.map((tag) => <span key={tag}><Check size={13} /> {tag}</span>)}</div></div><aside className="profile-guidelines-card"><span className="guidelines-icon"><ShieldCheck size={21} /></span><span className="section-kicker">GÜVENLİ KULLANIM</span><h3>Bilgiye bak,<br /><em>kararını kendin ver.</em></h3><p>İlanlar yayın öncesinde yönetici tarafından gözden geçirilir. Uygunsuz veya izinsiz içerikleri bildirin.</p><a href="#community">Topluluk ilkeleri <ArrowRight size={15} /></a></aside></section>
     <section className="related-section"><div className="section-heading-row related-heading"><div><div className="section-kicker"><span className="eyebrow-line" /> SANA GÖRE</div><h2>Benzer <em>profiller</em></h2><p className="section-intro">Antalya'dan diğer yayınlanmış profillere göz at.</p></div><Link href="/#profiles" className="text-link">Tüm ilanları gör <ArrowRight size={16} /></Link></div>{similar.length ? <div className="profiles-grid related-grid">{similar.map((item) => <ProfileCard key={item.slug} profile={item} />)}</div> : <div className="empty-results"><strong>Şimdilik benzer ilan yok.</strong></div>}</section>

@@ -1,1 +1,1 @@
-{"routes":[{"path":"/","title":"VIP İlan | Antalya'dan Seçkiler"},{"path":"/admin","title":"Yönetim Paneli | VIP İlan"},{"path":"/profil/:slug","title":"Profil Detayı | VIP İlan"}]}
+{"routes":[{"path":"/","title":"VIP İlan | Antalya'dan Seçkiler"},{"path":"/admin","title":"Yönetim Paneli | VIP İlan"},{"path":"/profil/:slug","title":"Profil Detayı | VIP İlan"},{"path":"/kategori/:slug","title":"Kategori"},{"path":"/bolge/:citySlug/:districtSlug","title":"Semt"},{"path":"/bolge/:citySlug","title":"Şehir"},{"path":"/icerik/:slug","title":"İçerik"}]}
