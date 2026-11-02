@@ -20,6 +20,7 @@ export const ENV = {
   get ownerOpenId() { return process.env.OWNER_OPEN_ID ?? ""; },
   get adminEmail() { return process.env.ADMIN_EMAIL?.trim().toLowerCase() ?? ""; },
   get adminPassword() { return process.env.ADMIN_PASSWORD ?? ""; },
+  get publicSiteUrl() { return process.env.PUBLIC_SITE_URL?.trim() ?? ""; },
   get dataDir() {
     return path.resolve(process.env.DATA_DIR || (this.authProvider === "local" ? "/data" : "./data"));
   },

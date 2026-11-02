@@ -1,7 +1,7 @@
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import { nanoid } from "nanoid";
-import { InsertUser, Listing, listings, users } from "../drizzle/schema";
+import { categories, InsertUser, Listing, listings, locations, users } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 import { storageUrl } from "./storage";
 
@@ -84,6 +84,11 @@ export type ListingWrite = {
   languages: string[];
   tags: string[];
   imageKeys: string[];
+  categoryId: number | null;
+  locationId: number | null;
+  seoTitle: string | null;
+  seoDescription: string | null;
+  allowIndexing: boolean;
   contactPhone: string | null;
   contactVisible: boolean;
   isVerified: boolean;
@@ -118,6 +123,16 @@ export type PublicListing = {
   likes: number;
   activity: string;
   contactVisible: boolean;
+  categoryId: number | null;
+  categoryName: string | null;
+  categorySlug: string | null;
+  locationId: number | null;
+  city: string | null;
+  citySlug: string | null;
+  districtSlug: string | null;
+  seoTitle: string | null;
+  seoDescription: string | null;
+  allowIndexing: boolean;
 };
 
 function parseStringArray(value: string | null | undefined): string[] {
@@ -144,7 +159,7 @@ function toAdminListing(row: Listing): AdminListing {
   };
 }
 
-function toPublicListing(row: Listing): PublicListing {
+export function toPublicListing(row: Listing): PublicListing {
   const imageKeys = parseStringArray(row.imageKeysJson);
   const images = imageKeys.map(storageUrl);
   return {
@@ -165,7 +180,45 @@ function toPublicListing(row: Listing): PublicListing {
     likes: 0,
     activity: "Profil yayında",
     contactVisible: row.contactVisible && Boolean(row.contactPhone),
+    categoryId: row.categoryId ?? null,
+    categoryName: null,
+    categorySlug: null,
+    locationId: row.locationId ?? null,
+    city: null,
+    citySlug: null,
+    districtSlug: null,
+    seoTitle: row.seoTitle ?? null,
+    seoDescription: row.seoDescription ?? null,
+    allowIndexing: row.allowIndexing,
   };
+}
+
+async function enrichPublicListings(rows: Listing[]): Promise<PublicListing[]> {
+  if (!rows.length) return [];
+  const db = await getDb();
+  if (!db) throw new Error("Database is not available");
+  const categoryIds = [...new Set(rows.flatMap((row) => row.categoryId ? [row.categoryId] : []))];
+  const locationIds = [...new Set(rows.flatMap((row) => row.locationId ? [row.locationId] : []))];
+  const [categoryRows, locationRows] = await Promise.all([
+    categoryIds.length ? db.select({ id: categories.id, name: categories.name, slug: categories.slug }).from(categories).where(and(inArray(categories.id, categoryIds), eq(categories.isActive, true))) : Promise.resolve([]),
+    locationIds.length ? db.select({ id: locations.id, city: locations.city, citySlug: locations.citySlug, districtSlug: locations.districtSlug }).from(locations).where(and(inArray(locations.id, locationIds), eq(locations.isActive, true))) : Promise.resolve([]),
+  ]);
+  const categoryById = new Map(categoryRows.map((row) => [row.id, row]));
+  const locationById = new Map(locationRows.map((row) => [row.id, row]));
+  return rows.map((row) => {
+    const profile = toPublicListing(row);
+    const category = row.categoryId ? categoryById.get(row.categoryId) : undefined;
+    const location = row.locationId ? locationById.get(row.locationId) : undefined;
+    return {
+      ...profile,
+      location: location?.city ?? profile.location,
+      categoryName: category?.name ?? null,
+      categorySlug: category?.slug ?? null,
+      city: location?.city ?? null,
+      citySlug: location?.citySlug ?? null,
+      districtSlug: location?.districtSlug ?? null,
+    };
+  });
 }
 
 function slugify(value: string) {
@@ -187,6 +240,11 @@ function writeValues(input: ListingWrite, publishedAt: Date | null) {
     languagesJson: JSON.stringify(input.languages),
     tagsJson: JSON.stringify(input.tags),
     imageKeysJson: JSON.stringify(input.imageKeys),
+    categoryId: input.categoryId,
+    locationId: input.locationId,
+    seoTitle: input.seoTitle?.trim() || null,
+    seoDescription: input.seoDescription?.trim() || null,
+    allowIndexing: input.allowIndexing,
     contactPhone: input.contactPhone?.trim() || null,
     contactVisible: Boolean(input.contactVisible && input.contactPhone?.trim()),
     isVerified: input.isVerified,
@@ -204,7 +262,26 @@ export async function getPublicListings(): Promise<PublicListing[]> {
   const rows = await db.select().from(listings)
     .where(eq(listings.status, "published"))
     .orderBy(desc(listings.isFeatured), desc(listings.publishedAt), desc(listings.updatedAt));
-  return rows.map(toPublicListing);
+  return enrichPublicListings(rows);
+}
+
+export async function getPublicListingsByCategoryId(categoryId: number): Promise<PublicListing[]> {
+  const db = await getDb();
+  if (!db) throw new Error("Database is not available");
+  const rows = await db.select().from(listings)
+    .where(and(eq(listings.status, "published"), eq(listings.categoryId, categoryId)))
+    .orderBy(desc(listings.isFeatured), desc(listings.publishedAt), desc(listings.updatedAt));
+  return enrichPublicListings(rows);
+}
+
+export async function getPublicListingsByLocationIds(locationIds: number[]): Promise<PublicListing[]> {
+  if (!locationIds.length) return [];
+  const db = await getDb();
+  if (!db) throw new Error("Database is not available");
+  const rows = await db.select().from(listings)
+    .where(and(eq(listings.status, "published"), inArray(listings.locationId, locationIds)))
+    .orderBy(desc(listings.isFeatured), desc(listings.publishedAt), desc(listings.updatedAt));
+  return enrichPublicListings(rows);
 }
 
 export async function getPublicListing(slug: string): Promise<PublicListing | undefined> {
@@ -212,7 +289,7 @@ export async function getPublicListing(slug: string): Promise<PublicListing | un
   if (!db) throw new Error("Database is not available");
   const rows = await db.select().from(listings)
     .where(and(eq(listings.slug, slug), eq(listings.status, "published"))).limit(1);
-  return rows[0] ? toPublicListing(rows[0]) : undefined;
+  return rows[0] ? (await enrichPublicListings(rows))[0] : undefined;
 }
 
 export async function getPublicContact(slug: string) {

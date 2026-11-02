@@ -6,6 +6,7 @@ export function publicPlatformConfig(env: NodeJS.ProcessEnv = process.env) {
     apiUrl: env.MANUS_API_URL ?? "",
     apiBrowserKey: env.MANUS_API_BROWSER_KEY ?? "",
     authProvider: env.AUTH_PROVIDER === "local" ? "local" : "manus",
+    siteUrl: env.PUBLIC_SITE_URL ?? "",
   };
 }
 

@@ -10,6 +10,7 @@ import { serveStatic, setupVite } from "./vite";
 import { ENV } from "./env";
 import { assertLocalAuthConfiguration } from "./local-auth";
 import * as db from "../db";
+import { registerSeoRoutes } from "../cms/seo";
 
 async function startServer() {
   if (ENV.authProvider === "local") await assertLocalAuthConfiguration();
@@ -46,8 +47,11 @@ async function startServer() {
 
   app.use("/api/trpc", createExpressMiddleware({ router: appRouter, createContext }));
   if (process.env.NODE_ENV === "development") {
-    await setupVite(app, server);
+    await setupVite(app, server, async (vite) => {
+      registerSeoRoutes(app, (url, html) => vite.transformIndexHtml(url, html));
+    });
   } else {
+    registerSeoRoutes(app);
     serveStatic(app);
   }
 

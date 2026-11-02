@@ -8,7 +8,28 @@ import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { adminProcedure, publicProcedure, router } from "./_core/trpc";
 import * as db from "./db";
+import * as cmsDb from "./cms/db";
 import { storagePut } from "./storage";
+
+const slugSchema = z.string().trim().min(1).max(160).regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, "Slug yalnızca küçük harf, rakam ve tire içerebilir.");
+const hrefSchema = z.string().trim().min(1).max(500).superRefine((value, context) => {
+  const safeLocal = value.startsWith("/") && !value.startsWith("//") && !value.includes("\\");
+  if (safeLocal) return;
+  try {
+    const url = new URL(value);
+    if (!["http:", "https:"].includes(url.protocol) || url.username || url.password) throw new Error("unsafe");
+  } catch {
+    context.addIssue({ code: "custom", message: "Bağlantı / ile başlayan yerel adres veya http(s) URL olmalıdır." });
+  }
+});
+const publicMediaSchema = z.string().trim().max(500).nullable().refine((value) => {
+  if (!value) return true;
+  if (value.startsWith("/") && !value.startsWith("//") && !value.includes("\\")) return true;
+  try {
+    const url = new URL(value);
+    return ["http:", "https:"].includes(url.protocol) && !url.username && !url.password;
+  } catch { return false; }
+}, "Görsel adresi / ile başlayan site yolu veya geçerli http(s) URL olmalıdır.");
 
 const listingInput = z.object({
   name: z.string().trim().min(1).max(120),
@@ -21,6 +42,11 @@ const listingInput = z.object({
   languages: z.array(z.string().trim().min(1).max(40)).max(12),
   tags: z.array(z.string().trim().min(1).max(40)).max(20),
   imageKeys: z.array(z.string().regex(/^vip-ilan\/listings\/[A-Za-z0-9._-]+$/)).max(12),
+  categoryId: z.number().int().positive().nullable().default(null),
+  locationId: z.number().int().positive().nullable().default(null),
+  seoTitle: z.string().trim().max(180).nullable().default(null),
+  seoDescription: z.string().trim().max(320).nullable().default(null),
+  allowIndexing: z.boolean().default(true),
   contactPhone: z.string().trim().max(40).nullable().optional(),
   contactVisible: z.boolean().default(false),
   isVerified: z.boolean().default(false),
@@ -46,8 +72,75 @@ function toListingWrite(input: ListingInput): db.ListingWrite {
     ...input,
     contactPhone: input.contactPhone?.trim() || null,
     height: input.height || "Belirtilmedi",
+    categoryId: input.categoryId,
+    locationId: input.locationId,
+    seoTitle: input.seoTitle?.trim() || null,
+    seoDescription: input.seoDescription?.trim() || null,
   };
 }
+
+async function normalizeListingRelations(input: ListingInput): Promise<ListingInput> {
+  if (!input.locationId) throw new TRPCError({ code: "BAD_REQUEST", message: "İlan için aktif bir şehir/semt seçin." });
+  const location = await cmsDb.getLocationById(input.locationId);
+  if (!location) throw new TRPCError({ code: "BAD_REQUEST", message: "Seçilen bölge artık aktif değil. Lütfen başka bir bölge seçin." });
+  if (input.categoryId && !(await cmsDb.getCategoryById(input.categoryId))) throw new TRPCError({ code: "BAD_REQUEST", message: "Seçilen kategori artık aktif değil. Lütfen başka bir kategori seçin." });
+  return { ...input, locationId: location.id, location: location.city, district: location.district };
+}
+
+function asConflict(error: unknown): never {
+  const dbError = error as { code?: string; errno?: number; cause?: { code?: string; errno?: number } };
+  if (dbError?.code === "ER_DUP_ENTRY" || dbError?.errno === 1062 || dbError?.cause?.code === "ER_DUP_ENTRY" || dbError?.cause?.errno === 1062) {
+    throw new TRPCError({ code: "CONFLICT", message: "Bu slug veya aynı adla kayıtlı benzersiz bir öğe zaten var." });
+  }
+  throw error;
+}
+
+const cmsSiteSettingsInput = z.object({
+  siteName: z.string().trim().min(1).max(120),
+  homeTitle: z.string().trim().min(1).max(180),
+  homeDescription: z.string().trim().min(1).max(3000),
+  heroEyebrow: z.string().trim().min(1).max(80),
+  heroHeading: z.string().trim().min(1).max(220),
+  heroBody: z.string().trim().min(1).max(3000),
+  defaultSeoTitle: z.string().trim().min(1).max(180),
+  defaultSeoDescription: z.string().trim().min(1).max(320),
+  defaultSocialImage: publicMediaSchema,
+});
+const cmsCategoryInput = z.object({
+  id: z.number().int().positive().optional(),
+  name: z.string().trim().min(1).max(120),
+  slug: slugSchema,
+  description: z.string().max(15000).default(""),
+  seoTitle: z.string().trim().max(180).nullable().default(null),
+  seoDescription: z.string().trim().max(320).nullable().default(null),
+  allowIndexing: z.boolean().default(true),
+  sortOrder: z.number().int().min(0).max(9999).default(0),
+  isActive: z.boolean().default(true),
+});
+const cmsLocationInput = z.object({
+  id: z.number().int().positive().optional(),
+  city: z.string().trim().min(1).max(120),
+  citySlug: slugSchema.max(140),
+  district: z.string().trim().min(1).max(120),
+  districtSlug: slugSchema.max(140),
+  description: z.string().max(15000).default(""),
+  seoTitle: z.string().trim().max(180).nullable().default(null),
+  seoDescription: z.string().trim().max(320).nullable().default(null),
+  allowIndexing: z.boolean().default(true),
+  sortOrder: z.number().int().min(0).max(9999).default(0),
+  isActive: z.boolean().default(true),
+});
+const cmsPageInput = z.object({
+  id: z.number().int().positive().optional(),
+  slug: slugSchema,
+  title: z.string().trim().min(1).max(180),
+  summary: z.string().trim().max(320).default(""),
+  body: z.string().trim().min(1).max(15000),
+  seoTitle: z.string().trim().max(180).nullable().default(null),
+  seoDescription: z.string().trim().max(320).nullable().default(null),
+  allowIndexing: z.boolean().default(true),
+  status: z.enum(["draft", "published"]),
+});
 
 function publicUploadError(error: unknown): never {
   console.error("[Listings] Storage upload failed", error instanceof Error ? error.message : "unknown error");
@@ -92,8 +185,8 @@ export const appRouter = router({
       return { phone };
     }),
     adminList: adminProcedure.query(() => db.getAdminListings()),
-    create: adminProcedure.input(listingInput).mutation(({ input }) => db.createListing(toListingWrite(input))),
-    update: adminProcedure.input(z.object({ id: z.number().int().positive(), data: listingInput })).mutation(({ input }) => db.updateListing(input.id, toListingWrite(input.data))),
+    create: adminProcedure.input(listingInput).mutation(async ({ input }) => { const normalized = await normalizeListingRelations(input); return db.createListing(toListingWrite(normalized)); }),
+    update: adminProcedure.input(z.object({ id: z.number().int().positive(), data: listingInput })).mutation(async ({ input }) => { const normalized = await normalizeListingRelations(input.data); return db.updateListing(input.id, toListingWrite(normalized)); }),
     archive: adminProcedure.input(z.object({ id: z.number().int().positive() })).mutation(({ input }) => db.archiveListing(input.id)),
     uploadListingImage: adminProcedure.input(z.object({ listingId: z.number().int().positive(), fileName: z.string().min(1).max(180), mimeType: z.enum(["image/jpeg", "image/png", "image/webp"]), dataBase64: z.string().min(1).max(7_000_000) })).mutation(async ({ input }) => {
       const listing = await db.getAdminListingById(input.listingId);
@@ -119,6 +212,49 @@ export const appRouter = router({
         return publicUploadError(error);
       }
     }),
+  }),
+  site: router({
+    publicLayout: publicProcedure.query(() => cmsDb.getPublicLayout()),
+    publicCategoryPage: publicProcedure.input(z.object({ slug: slugSchema })).query(async ({ input }) => {
+      const page = await cmsDb.getPublicCategoryPage(input.slug);
+      if (!page) throw new TRPCError({ code: "NOT_FOUND", message: "Kategori bulunamadı veya yayında değil." });
+      return page;
+    }),
+    publicLocationPage: publicProcedure.input(z.object({ citySlug: slugSchema, districtSlug: slugSchema.optional() })).query(async ({ input }) => {
+      const page = await cmsDb.getPublicLocationPage(input.citySlug, input.districtSlug);
+      if (!page) throw new TRPCError({ code: "NOT_FOUND", message: "Bölge bulunamadı veya yayında değil." });
+      return page;
+    }),
+    publicContentPage: publicProcedure.input(z.object({ slug: slugSchema })).query(async ({ input }) => {
+      const page = await cmsDb.getPublicContentPage(input.slug);
+      if (!page) throw new TRPCError({ code: "NOT_FOUND", message: "Sayfa bulunamadı veya yayınlanmadı." });
+      return page;
+    }),
+    adminLists: adminProcedure.query(() => cmsDb.getAdminCmsLists()),
+    adminListingOptions: adminProcedure.query(() => cmsDb.getAdminListingOptions()),
+    updateSettings: adminProcedure.input(cmsSiteSettingsInput).mutation(async ({ input }) => {
+      try { return await cmsDb.updateSiteSettings({ ...input, defaultSocialImage: input.defaultSocialImage || null }); }
+      catch (error) { return asConflict(error); }
+    }),
+    saveNavigation: adminProcedure.input(z.object({ id: z.number().int().positive().optional(), placement: z.enum(["header", "footer"]), label: z.string().trim().min(1).max(100), href: hrefSchema, sortOrder: z.number().int().min(0).max(9999), isActive: z.boolean() })).mutation(async ({ input }) => {
+      try { return await cmsDb.saveNavigationItem(input); } catch (error) { return asConflict(error); }
+    }),
+    setNavigationActive: adminProcedure.input(z.object({ id: z.number().int().positive(), isActive: z.boolean() })).mutation(({ input }) => cmsDb.setNavigationItemActive(input.id, input.isActive)),
+    saveCategory: adminProcedure.input(cmsCategoryInput).mutation(async ({ input }) => {
+      try { return await cmsDb.saveCategory({ ...input, seoTitle: input.seoTitle || null, seoDescription: input.seoDescription || null }); }
+      catch (error) { return asConflict(error); }
+    }),
+    setCategoryActive: adminProcedure.input(z.object({ id: z.number().int().positive(), isActive: z.boolean() })).mutation(({ input }) => cmsDb.setCategoryActive(input.id, input.isActive)),
+    saveLocation: adminProcedure.input(cmsLocationInput).mutation(async ({ input }) => {
+      try { return await cmsDb.saveLocation({ ...input, seoTitle: input.seoTitle || null, seoDescription: input.seoDescription || null }); }
+      catch (error) { return asConflict(error); }
+    }),
+    setLocationActive: adminProcedure.input(z.object({ id: z.number().int().positive(), isActive: z.boolean() })).mutation(({ input }) => cmsDb.setLocationActive(input.id, input.isActive)),
+    saveContentPage: adminProcedure.input(cmsPageInput).mutation(async ({ input }) => {
+      try { return await cmsDb.saveContentPage({ ...input, seoTitle: input.seoTitle || null, seoDescription: input.seoDescription || null }); }
+      catch (error) { return asConflict(error); }
+    }),
+    archiveContentPage: adminProcedure.input(z.object({ id: z.number().int().positive() })).mutation(({ input }) => cmsDb.archiveContentPage(input.id)),
   }),
 });
 

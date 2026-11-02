@@ -3,10 +3,10 @@ import fs from "fs";
 import { type Server } from "http";
 import { nanoid } from "nanoid";
 import path from "path";
-import { createServer as createViteServer } from "vite";
+import { createServer as createViteServer, type ViteDevServer } from "vite";
 import viteConfig from "../../vite.config";
 
-export async function setupVite(app: Express, server: Server) {
+export async function setupVite(app: Express, server: Server, beforeMiddleware?: (vite: ViteDevServer) => Promise<void>) {
   const serverOptions = {
     middlewareMode: true,
     hmr: { server },
@@ -19,6 +19,8 @@ export async function setupVite(app: Express, server: Server) {
     server: serverOptions,
     appType: "custom",
   });
+
+  await beforeMiddleware?.(vite);
 
   app.use(vite.middlewares);
   app.use("*", async (req, res, next) => {
@@ -39,7 +41,8 @@ export async function setupVite(app: Express, server: Server) {
         `src="/src/main.tsx?v=${nanoid()}"`
       );
       const page = await vite.transformIndexHtml(url, template);
-      res.status(200).set({ "Content-Type": "text/html" }).end(page);
+      res.setHeader("X-Robots-Tag", "noindex, nofollow");
+      res.status(404).set({ "Content-Type": "text/html" }).end(page);
     } catch (e) {
       vite.ssrFixStacktrace(e as Error);
       next(e);
@@ -62,11 +65,13 @@ export function serveStatic(app: Express) {
 
   // the app's not-found page keeps a real 404 status for crawlers
   app.get("/404", (_req, res) => {
+    res.setHeader("X-Robots-Tag", "noindex, nofollow");
     res.status(404).sendFile(path.resolve(distPath, "index.html"));
   });
 
   // fall through to index.html if the file doesn't exist
   app.use("*", (_req, res) => {
-    res.sendFile(path.resolve(distPath, "index.html"));
+    res.setHeader("X-Robots-Tag", "noindex, nofollow");
+    res.status(404).sendFile(path.resolve(distPath, "index.html"));
   });
 }

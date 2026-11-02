@@ -15,6 +15,34 @@
       "when": 1793609127995,
       "tag": "0001_useful_kabuki",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1793633346580,
+      "tag": "0002_content_seo_cms",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "5",
+      "when": 1793633427147,
+      "tag": "0003_taxonomy_indexability",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "5",
+      "when": 1793634256596,
+      "tag": "0004_listings_taxonomy_indexes",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "5",
+      "when": 1793634795119,
+      "tag": "0005_repair_legacy_location_links",
+      "breakpoints": true
     }
   ]
 }
