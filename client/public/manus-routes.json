@@ -1,0 +1,1 @@
+{"routes":[{"path":"/","title":"VIP İlan | Antalya'dan Seçkiler"},{"path":"/admin","title":"Yönetim Paneli | VIP İlan"},{"path":"/profil/:slug","title":"Profil Detayı | VIP İlan"}]}
